@@ -57,7 +57,7 @@ class Filemanager extends Common
             $this->rel_path .= "/";
         }
         if (!empty($get['query'])) {
-            $this->query = escapeshellarg($get['query']);
+            $this->query = $get['query'];
         }
         if (!empty($get['options'])) {
             $this->foptions = $get['options'];
@@ -71,10 +71,10 @@ class Filemanager extends Common
         }
         // Search
         if (!empty($post['search_string'])) {
-            $this->search_string = escapeshellarg($post['search_string']);
+            $this->search_string = $post['search_string'];
         }
         if (!empty($post['search_file_type'])) {
-            $this->search_file_type = escapeshellarg($post['search_file_type']);
+            $this->search_file_type = $post['search_file_type'];
         }
         // Create
         if (!empty($get['type'])) {
@@ -175,23 +175,26 @@ class Filemanager extends Common
         } else {
             chdir($this->path);
             $input = str_replace('"', '', $this->query);
-            $vinput = preg_quote($input);
             $cmd = 'find -L ';
+            $strategy = '';
+
             if ($this->foptions && $this->foptions['strategy']) {
-                switch ($this->f_options['strategy']) {
-                    case 'left_prefix':
-                        $cmd = "$cmd -iname \"$vinput*\"";
-                        break;
-                    case 'substring':
-                        $cmd = "$cmd -iname \"*$vinput*\"";
-                        break;
-                    case 'regexp':
-                        $cmd = "$cmd -regex \"$input\"";
-                        break;
-                }
-            } else {
-                $cmd = 'find -L -iname "' . $input . '*"';
+                $strategy = $this->foptions['strategy'];
             }
+
+            switch ($strategy) {
+                case 'substring':
+                    $cmd = "$cmd -iname ". escapeshellarg('*'. $input .'*');
+                    break;
+                case 'regexp':
+                    $cmd = "$cmd -regex ". escapeshellarg($input);
+                    break;
+                case 'left_prefix':
+                default:
+                    $cmd = "$cmd -iname ". escapeshellarg($input .'*');
+                    break;
+            }
+
             $cmd = "$cmd  -printf \"%h/%f %y\n\"";
             $output = shell_exec($cmd);
             $file_arr = explode("\n", $output);
@@ -238,11 +241,14 @@ class Filemanager extends Common
             if ($_GET['type'] == 1) {
                 $this->path = WORKSPACE;
             }
-            $input = str_replace('"', '', $this->search_string);
-            $input = preg_quote($input);
-            $output = shell_exec('find -L ' . $this->path . ' -iregex  ".*' . $this->search_file_type  . '" -type f | xargs grep -i -I -n -R -H "' . $input . '"');
-            $output_arr = explode("\n", $output);
+
             $return = array();
+
+            $input = str_replace('"', '', $this->search_string);
+            $cmd = 'find -L ' . escapeshellarg($this->path) . ' -iregex  '.escapeshellarg('.*' . $this->search_file_type ).' -type f | xargs grep -i -I -n -R -H ' . escapeshellarg($input) . '';
+            $output = shell_exec($cmd);
+            $output_arr = explode("\n", $output);
+
             foreach ($output_arr as $line) {
                 $data = explode(":", $line);
                 $da = array();
@@ -273,7 +279,7 @@ class Filemanager extends Common
     {
         if (is_file($this->path)) {
             $output = file_get_contents($this->path);
-            
+
             if (extension_loaded('mbstring')) {
                 if (!mb_check_encoding($output, 'UTF-8')) {
                     if (mb_check_encoding($output, 'ISO-8859-1')) {
@@ -283,7 +289,7 @@ class Filemanager extends Common
                     }
                 }
             }
-        
+
             $this->status = "success";
             $this->data = '"content":' . json_encode($output);
             $mtime = filemtime($this->path);
@@ -410,7 +416,6 @@ class Filemanager extends Common
             $new_path = implode("/", $explode) . "/" . $this->new_name;
             if (!file_exists($new_path)) {
                 if (rename($this->path, $new_path)) {
-                    //unlink($this->path);
                     $this->status = "success";
                 } else {
                     $this->status = "error";
@@ -435,11 +440,10 @@ class Filemanager extends Common
                 if (is_file($this->path)) {
                     $serverMTime = filemtime($this->path);
                     $fileContents = file_get_contents($this->path);
-    
+
                     if ($this->patch && $this->mtime != $serverMTime) {
                         $this->status = "error";
                         $this->message = "Client is out of sync";
-                        //DEBUG : file_put_contents($this->path.".conflict", "SERVER MTIME :".$serverMTime.", CLIENT MTIME :".$this->mtime);
                         $this->respond();
                         return;
                     } elseif (strlen(trim($this->patch)) == 0 && ! $this->content) {
@@ -449,16 +453,14 @@ class Filemanager extends Common
                         $this->respond();
                         return;
                     }
-    
+
                     if ($file = fopen($this->path, 'w')) {
                         if ($this->patch) {
                             $dmp = new diff_match_patch();
                             $p = $dmp->patch_apply($dmp->patch_fromText($this->patch), $fileContents);
                             $this->content = $p[0];
-                            //DEBUG : file_put_contents($this->path.".orig",$fileContents );
-                            //DEBUG : file_put_contents($this->path.".patch", $this->patch);
                         }
-    
+
                         if (fwrite($file, $this->content) === false) {
                             $this->status = "error";
                             $this->message = "could not write to file";
@@ -470,7 +472,7 @@ class Filemanager extends Common
                             $this->data = '"mtime":'.filemtime($this->path);
                             $this->status = "success";
                         }
-    
+
                         fclose($file);
                     } else {
                         $this->status = "error";
@@ -548,7 +550,7 @@ class Filemanager extends Common
         } else {
             // Handle upload
             $info = array();
-            while (list($key,$value) = each($_FILES['upload']['name'])) {
+            foreach( $_FILES['upload']['name'] as $key=>$value) {
                 if (!empty($value)) {
                     $filename = $value;
                     $add = $this->path."/$filename";
@@ -604,7 +606,7 @@ class Filemanager extends Common
 
     public static function cleanPath($path)
     {
-    
+
         // replace backslash with slash
         $path = str_replace('\\', '/', $path);
 
